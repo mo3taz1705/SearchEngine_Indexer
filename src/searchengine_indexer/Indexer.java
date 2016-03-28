@@ -25,6 +25,7 @@ import org.jsoup.*;
 import org.jsoup.helper.*;
 import org.jsoup.nodes.*;
 import org.jsoup.select.*;
+import org.tartarus.snowball.ext.englishStemmer;
 
 public class Indexer {
     protected static final String[] frequentWords = {"a", "an", "the"};
@@ -40,8 +41,19 @@ public class Indexer {
         word = word.replaceAll("\\p{Punct}","");
         word = word.trim();
         word = word.replaceAll("\u00A0", "");  //remove Non-breaking space
+        word = stemWord(word);
         word = word.toLowerCase();
         return word;
+    }
+    
+    private static String stemWord(String word){
+        englishStemmer stemmer = new englishStemmer();
+        stemmer.setCurrent(word);
+        if(stemmer.stem()){
+            return stemmer.getCurrent();
+        }else{
+            return word;
+        }
     }
     
     public Indexer() {
