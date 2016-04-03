@@ -1,49 +1,46 @@
-/*
- * To change this license header, choose License Headers in Project Properties.
- * To change this template file, choose Tools | Templates
- * and open the template in the editor.
- */
+package apt.search.engine;
 
-package searchengine_indexer;
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 
 /**
  *
  * @author Moutaz and Omar
  */
 
-import java.io.File;
-import java.io.IOException;
-import java.sql.*;
+
 import java.text.Normalizer;
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.Scanner;
-import java.util.logging.Level;
-import java.util.logging.Logger;
-import java.util.regex.Pattern;
-import org.jsoup.*;
-import org.jsoup.helper.*;
+
+import org.jsoup.Jsoup;
 import org.jsoup.nodes.*;
 import org.jsoup.select.*;
 import org.tartarus.snowball.ext.englishStemmer;
 
 public class Indexer {
     protected static final String[] frequentWords = {"a", "an", "the"};
-    protected static final String[] wordTableNames = {"word", "word2"};
+    protected static final String[] wordTableNames = {"words", "words2"};
     
     private int createdTablePosition = 0;
     //private static final Pattern UNDESIRABLES = Pattern.compile("[][(){},.;!?<>%\\]");
     //Containing Tags
     private final int TITLE = 1, META = 2, HEADER = 3, BODY = 4;
     
-    private static String processWord(String word) {
+    private static String[] processWord(String word) {
         word = Normalizer.normalize(word, Normalizer.Form.NFC); //transforms Unicode text into an equivalent composed form
-        word = word.replaceAll("\\p{Punct}","");
+        word = word.replaceAll("\\p{Punct}"," ");
+        word = word.replaceAll("\u00A0", " ");  //remove Non-breaking space
         word = word.trim();
-        word = word.replaceAll("\u00A0", "");  //remove Non-breaking space
-        word = stemWord(word);
-        word = word.toLowerCase();
-        return word;
+        String [] words = word.split(" ");
+        for(String s : words){
+        	s = stemWord(s);
+        	s = s.toLowerCase();
+        }
+//        word = stemWord(word);
+//        word = word.toLowerCase();
+        return words;
     }
     
     private static String stemWord(String word){
@@ -57,25 +54,50 @@ public class Indexer {
     }
     
     public Indexer() {
-        
+    	
     }
     
-    public void Index(Document doc) {
-        DatabaseClient databaseClient = DatabaseClient.GetClient();
+    public void IndexFilesInDirectory(String pages_directory) {
+    	createdTablePosition = createNewTable();
+    	try {
+			Files.walk(Paths.get(pages_directory)).forEach(filePath -> {
+			    if (Files.isRegularFile(filePath)) {
+			    	String fileName = filePath.getFileName().toString();
+			    	System.out.println("Indexing " + fileName);
+			    	int dot_position = fileName.indexOf('.');
+			    	if (dot_position < 1) {
+			    		System.out.println(":(");
+			    		return;
+			    	}
+			    	int page_id = Integer.parseInt(fileName.substring(0, dot_position));
+			    	File inputFile = filePath.toFile();
+			        Document doc = null;
+			        try {
+			            doc = Jsoup.parse(inputFile, "UTF-8");
+			        } catch (IOException ex) {
+			        	System.out.println("Jsoup couldn't parse file");
+			        	return;
+			        }
+			        Index(doc, page_id);
+			    }
+			});
+		} catch (IOException e) {
+			System.out.println("Couldn't open directory " + pages_directory);
+			return;
+		}
+    	dropOldTable();
+    	
+    } 
+    private void Index(Document doc, int page_id) {
         //int page_id = databaseClient.AddPage(doc.baseUri(), 0, 0);
-        int page_id = databaseClient.AddPageProcedure(doc.baseUri(), 0, 0);
-        createdTablePosition = createNewTable();
-        
+        //int page_id = databaseClient.AddPageProcedure(doc.baseUri(), 0, 0);
+//        
+//        createdTablePosition = 0;
         String title = GetTagsText(doc, "title").toString();
         String meta = GetMeta(doc).toString();
         String headers = GetHeaders(doc).toString();
         RemoveHeaders(doc);
         String body = GetTagsText(doc, "body").toString();
-        
-//        System.out.println(doc.baseUri());
-//        System.out.println(title);
-//        System.out.println(meta);
-//        System.out.println(headers);
         
         int nextPosition = 0;
         nextPosition = StoreWords(page_id, title, TITLE, nextPosition);
@@ -83,7 +105,7 @@ public class Indexer {
         nextPosition = StoreWords(page_id, headers, HEADER, nextPosition);
         nextPosition = StoreWords(page_id, body, BODY, nextPosition);
         
-        dropOldTable();
+//        dropOldTable();
     }
     
     private StringBuffer GetTagsText(Document doc, String tag) {
@@ -147,23 +169,28 @@ public class Indexer {
         DatabaseClient databaseClient = DatabaseClient.GetClient();
         Scanner scanner = new Scanner(words);
         while (scanner.hasNext()) {
-            String word = scanner.next();
-            word = Indexer.processWord(word);
+            String nextWord = scanner.next();
+            String [] wordsArray = Indexer.processWord(nextWord);
             
-            if (word.length() == 0) continue;
+            for(String word : wordsArray){
+            	if (word.length() == 0){ 
+            		continue;
+            	}
             
-            boolean isFrequent = false;
-            for (String frequentWord : Indexer.frequentWords) {
-                if (word.equals(frequentWord)) {
-                    isFrequent = true;
-                    break;
-                }
+            	boolean isFrequent = false;
+            	for (String frequentWord : Indexer.frequentWords) {
+            		if (word.equals(frequentWord)) {
+            			isFrequent = true;
+            			break;
+            		}
+            	}
+            	if (isFrequent) continue;
+            
+            	databaseClient.AddWord(word, page_id, position, containing_tag, wordTableNames[createdTablePosition]);
+            	position += 1;
             }
-            if (isFrequent) continue;
-            
-            databaseClient.AddWord(word, page_id, position, containing_tag, wordTableNames[createdTablePosition]);
-            position += 1;
         } 
+        scanner.close();
         return position;
     }
     
